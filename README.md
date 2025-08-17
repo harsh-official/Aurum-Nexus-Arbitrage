@@ -70,10 +70,4 @@ This strategy is **for educational and research purposes only**. Performance res
 
 ---
 
-## Screenshots
-
-Add your screenshots in the appropriate sections above for best results and easier tracking of strategy performance. 
-
----
-
 **Happy Trading!**
