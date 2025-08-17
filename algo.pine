@@ -1,0 +1,107 @@
+//@version=6
+strategy("XAU/USD Enhanced Arbitrage Strategy", overlay=true, shorttitle="XAU Arbitrage+SL", margin_long=100, margin_short=100)
+
+// Strategy Parameters
+input_asian_start = input.session("Asian Session", "0000-0800")
+input_london_start = input.session("London Session", "0800-1600")
+input_ny_start = input.session("NY Session", "1200-2000")
+input_atr_length = input.int(14, "ATR Length")
+input_vol_threshold = input.float(1.5, "Volatility Threshold (%)")
+input_z_score = input.float(-1.5, "Z-Score Threshold")
+
+// Enhanced Parameters
+rsi_length = input.int(14, "RSI Length")
+rsi_ob = input.int(65, "RSI Overbought")
+rsi_os = input.int(35, "RSI Oversold")
+adx_threshold = input.int(25, "ADX Threshold")
+trend_filter_length = input.int(50, "Trend Filter Length")
+
+// Corrected Session Detection
+in_asian = not na(time(timeframe.period, input_asian_start))
+in_london = not na(time(timeframe.period, input_london_start))
+in_ny = not na(time(timeframe.period, input_ny_start))
+
+// Cross-Market Analysis
+var float eurusd_close = na
+eurusd_close := request.security("EURUSD", timeframe.period, close)
+gold_eur_ratio = close / eurusd_close
+
+// Volatility Measurement
+atr = ta.atr(input_atr_length)
+volatility = (atr / close) * 100
+
+// Z-Score Calculation
+lookback = 200
+mean_ratio = ta.sma(gold_eur_ratio, lookback)
+std_ratio = ta.stdev(gold_eur_ratio, lookback)
+z_score = (gold_eur_ratio - mean_ratio) / std_ratio
+
+// Enhanced Indicators
+rsi = ta.rsi(close, rsi_length)
+[diplus, diminus, adx] = ta.dmi(14, 14)
+daily_sma = request.security(syminfo.tickerid, "D", ta.sma(close, trend_filter_length))
+uptrend = close > daily_sma
+downtrend = close < daily_sma
+
+// MACD Momentum Filter
+fast_length = 12
+slow_length = 26
+signal_length = 9
+macdLine = ta.ema(close, fast_length) - ta.ema(close, slow_length)
+signalLine = ta.ema(macdLine, signal_length)
+macdHist = macdLine - signalLine
+
+// Entry Conditions
+asian_long = in_asian and volatility < input_vol_threshold and 
+  ta.crossover(close, ta.sma(close, 20)) and rsi < rsi_ob
+asian_short = in_asian and volatility < input_vol_threshold and 
+  ta.crossunder(close, ta.sma(close, 20)) and rsi > rsi_os
+
+london_long = in_london and z_score < input_z_score and 
+  volatility > input_vol_threshold and adx > adx_threshold
+london_short = in_london and z_score > -input_z_score and 
+  volatility > input_vol_threshold and adx > adx_threshold
+
+ny_long = in_ny and close > ta.highest(close, 20) and 
+  volatility > input_vol_threshold and macdHist > 0
+ny_short = in_ny and close < ta.lowest(close, 20) and 
+  volatility > input_vol_threshold and macdHist < 0
+
+// Combined Conditions with Trend Filter
+long_condition = (asian_long or london_long or ny_long) and uptrend
+short_condition = (asian_short or london_short or ny_short) and downtrend
+
+// Track Entry Price and ATR
+var float longEntryPrice = na
+var float longStop = na
+var float longProfit = na
+var float shortEntryPrice = na
+var float shortStop = na
+var float shortProfit = na
+
+// Entry Orders
+if long_condition
+    strategy.entry("Long", strategy.long)
+    longEntryPrice := strategy.position_avg_price
+    longStop := longEntryPrice - atr * 1.5
+    longProfit := longEntryPrice + atr * 3
+
+if short_condition
+    strategy.entry("Short", strategy.short)
+    shortEntryPrice := strategy.position_avg_price
+    shortStop := shortEntryPrice + atr * 1.5
+    shortProfit := shortEntryPrice - atr * 3
+
+// Exit Orders with Fixed Stop Loss
+if strategy.position_size > 0
+    strategy.exit("Long Exit", "Long", stop=longStop, limit=longProfit, trail_points=atr * 10, trail_offset=atr * 5)
+
+if strategy.position_size < 0
+    strategy.exit("Short Exit", "Short", stop=shortStop, limit=shortProfit, trail_points=atr * 10, trail_offset=atr * 5)
+
+// Visualizations
+plot(ta.sma(close, 20), "MA20", color=#00bcd4)
+plotshape(long_condition, "Long Signal", shape.triangleup, 
+  location.belowbar, color=#4CAF50, size=size.small)
+plotshape(short_condition, "Short Signal", shape.triangledown, 
+  location.abovebar, color=#FF5252, size=size.small)
